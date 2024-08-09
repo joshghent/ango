@@ -12,3 +12,18 @@ services:
       - ./data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      - DATABASE_URL=postgres://postgres:example@db:5432/ango?sslmode=disable
+      - JWT_SECRET=your_jwt_secret
+      - API_KEY=your_api_key
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db

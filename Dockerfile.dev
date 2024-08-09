@@ -1,0 +1,20 @@
+# Use a more complete base image for Go development
+FROM golang:1.22-alpine
+
+WORKDIR /app
+
+# Install necessary tools
+RUN apk update && apk add git curl
+
+# Install Air for live reloading
+RUN go install github.com/air-verse/air@latest
+
+# Copy go.mod and go.sum and download dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Expose the application port
+EXPOSE 3000
+
+# Set the default command to run Air
+CMD ["air"]

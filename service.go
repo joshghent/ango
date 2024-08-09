@@ -5,6 +5,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
 	"github.com/jackc/pgx/v4"
 )
 
@@ -18,7 +21,36 @@ type Rules struct {
 	TimeLimit      int `json:"timelimit"`
 }
 
-func getCode(ctx context.Context, req Request) (string, error) {
+type CodeResult struct {
+	Code string
+	Err  error
+}
+
+func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
+	// Validate UUIDs
+	if _, err := uuid.Parse(req.BatchID); err != nil {
+		return "", gin.Error{
+			Err:  errors.New("invalid batch_id format"),
+			Type: gin.ErrorTypePublic,
+		}
+	}
+	if _, err := uuid.Parse(req.ClientID); err != nil {
+		return "", gin.Error{
+			Err:  errors.New("invalid client_id format"),
+			Type: gin.ErrorTypePublic,
+		}
+	}
+	if _, err := uuid.Parse(req.CustomerID); err != nil {
+		return "", gin.Error{
+			Err:  errors.New("invalid customer_id format"),
+			Type: gin.ErrorTypePublic,
+		}
+	}
+
+	// Create a new context with a timeout
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -40,7 +72,7 @@ func getCode(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 
-	if !checkRules(ctx, rules, req.CustomerID) {
+	if !checkRules(rules, req.CustomerID) {
 		return "", ErrConditionNotMet
 	}
 
@@ -59,10 +91,4 @@ func getCode(ctx context.Context, req Request) (string, error) {
 	}
 
 	return code, nil
-}
-
-func checkRules(ctx context.Context, rules Rules, customerID string) bool {
-	// Implement the actual logic to check maxpercustomer and timelimit
-	// This is a placeholder implementation
-	return true
 }
