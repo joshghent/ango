@@ -2,6 +2,13 @@
 
 Ango is a lightweight code distribution service built on Golang and Postgres. It's fully customisable and extensible to your needs.
 
+## The Numbers
+Ango has been load tested to death. That's what it's designed to do - handle huge volumes of load.
+The setup was two digitalocean VPS's running k8s with a load balancer in front.
+Results
+```
+```
+
 ## Use cases
 Ango can be used for anything where you want a customer to make a request and recieve a unique code back (with no duplicates).
 For example:
@@ -17,14 +24,26 @@ Below are the key concepts to familiarise yourself with.
 
 ### Codes
 Codes is the primary place where we fetch and distribute codes from.
+Codes can have certain rules associated with them (see below) and are associated with a particular batch and client.
 
 ### Batches
+Often times with codes they are grouped into batches. For example, an ecommerce business may have a "Summer sale" and discount codes associated with that.
+Batches are designed so that you can easily remove/expiry discount codes without having to know what each discount code is.
+Batches are always associated with clients and can have one or more codes.
 
 ### Clients
+Clients are your clients in your system. For example, if you are a ticketing business, you want to denote what codes are associated with which band that is performing - this would be marked with the client, with the performance being the "batch".
 
 ### Rules
+Batches can have rules. These are super extensible, thanks to being JSON based.
+Out of the box we have functionality to limit codes to N per customer and within a time limit. For example, 2 per customer every month.
+This can be expanded but you will need to update the code in `checkRules`.
 
 ## Install / Setup
+
+### To download
+
+### To test
 
 ### Integrating in your app
 
