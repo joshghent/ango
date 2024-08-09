@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -58,6 +59,20 @@ func getCodeHandler(c *gin.Context) {
 	var req Request
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "cannot parse json"})
+		return
+	}
+
+	// Validate UUIDs immediately after parsing JSON
+	if _, err := uuid.Parse(req.BatchID); err != nil {
+		c.JSON(400, gin.H{"error": "invalid batch_id format"})
+		return
+	}
+	if _, err := uuid.Parse(req.ClientID); err != nil {
+		c.JSON(400, gin.H{"error": "invalid client_id format"})
+		return
+	}
+	if _, err := uuid.Parse(req.CustomerID); err != nil {
+		c.JSON(400, gin.H{"error": "invalid customer_id format"})
 		return
 	}
 

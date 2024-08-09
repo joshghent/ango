@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
@@ -80,4 +83,55 @@ func TestGetCodeWithTimeout(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid customer_id format")
 		assert.Empty(t, code, "Expected no code to be returned")
 	})
+}
+
+func TestGetCodeHandler_InvalidJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		request  string
+		errorMsg string
+	}{
+		{
+			name: "Invalid BatchID",
+			request: `{
+                "batchid": "invalid-batch-id",
+                "clientid": "217be7c8-679c-4e08-bffc-db3451bdcdbf",
+                "customerid": "fba9230a-a521-430e-aaf8-8aefbf588071"
+            }`,
+			errorMsg: "invalid batch_id format",
+		},
+		{
+			name: "Invalid ClientID",
+			request: `{
+                "batchid": "c6ffca2e-603b-4b14-a39d-9e37b6f1d63b",
+                "clientid": "invalid-client-id",
+                "customerid": "fba9230a-a521-430e-aaf8-8aefbf588071"
+            }`,
+			errorMsg: "invalid client_id format",
+		},
+		{
+			name: "Invalid CustomerID",
+			request: `{
+                "batchid": "c6ffca2e-603b-4b14-a39d-9e37b6f1d63b",
+                "clientid": "217be7c8-679c-4e08-bffc-db3451bdcdbf",
+                "customerid": "invalid-customer-id"
+            }`,
+			errorMsg: "invalid customer_id format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/get-code", bytes.NewBuffer([]byte(tt.request)))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router := gin.Default()
+			router.POST("/api/get-code", getCodeHandler)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, 400, w.Code)
+			assert.Contains(t, w.Body.String(), tt.errorMsg)
+		})
+	}
 }
