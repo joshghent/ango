@@ -21,6 +21,7 @@ func main() {
 		log.Fatalf("Unable to connect to database: %v\n", err)
 	}
 	defer db.Close()
+	log.Println("Connected to the database successfully.")
 
 	r := gin.Default()
 
@@ -45,15 +46,32 @@ func connectToDB() (*pgxpool.Pool, error) {
 	var db *pgxpool.Pool
 	var err error
 	maxRetries := 5
+	databaseURL := os.Getenv("DATABASE_URL")
+
 	for i := 0; i < maxRetries; i++ {
-		db, err = pgxpool.Connect(context.Background(), os.Getenv("DATABASE_URL"))
+		db, err = pgxpool.Connect(context.Background(), databaseURL)
 		if err == nil {
-			break
+			// Test the connection by querying the "batches" table
+			err = testDBConnection(db)
+			if err == nil {
+				break
+			}
 		}
-		log.Printf("Unable to connect to database: %v\n", err)
+		log.Printf("Error connecting to database (attempt %d/%d): %v\nDatabase URL: %s", i+1, maxRetries, err, databaseURL)
 		time.Sleep(5 * time.Second)
 	}
+
 	return db, err
+}
+
+func testDBConnection(db *pgxpool.Pool) error {
+	// Try to query the "batches" table to ensure the connection is working and permissions are sufficient
+	var testResult int
+	err := db.QueryRow(context.Background(), "SELECT 1 FROM batches LIMIT 1").Scan(&testResult)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func getCodeHandler(c *gin.Context) {
