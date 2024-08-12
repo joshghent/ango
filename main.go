@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -83,6 +84,7 @@ func getCodeHandler(c *gin.Context) {
 		} else if err == ErrConditionNotMet {
 			c.JSON(403, gin.H{"error": "rule conditions not met"})
 		} else {
+			fmt.Printf("Error: %e", err)
 			c.JSON(500, gin.H{"error": "database error"})
 		}
 		return
