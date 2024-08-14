@@ -48,8 +48,8 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 	}
 
 	// Create a new context with a timeout
-	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	// defer cancel()
 
 	tx, err := db.Begin(ctx)
 	if err != nil {

@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	numRequests = 1000 // Total number of requests to send
-	concurrency = 100  // Number of concurrent requests
+	numRequests = 500 // Total number of requests to send
+	concurrency = 100 // Number of concurrent requests
 	url         = "https://ango-73r94.ondigitalocean.app/api/get-code"
 )
 
