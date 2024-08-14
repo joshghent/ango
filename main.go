@@ -20,7 +20,7 @@ func main() {
 	// Start pprof for profiling in a separate goroutine
 	go func() {
 		log.Println("Starting pprof on :6060")
-		http.ListenAndServe("localhost:6060", nil)
+		http.ListenAndServe(":6060", nil)
 	}()
 
 	var err error
