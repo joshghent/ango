@@ -3,17 +3,19 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-
 	"github.com/jackc/pgx/v4"
 )
 
 var (
 	ErrNoCodeFound     = errors.New("no code found")
 	ErrConditionNotMet = errors.New("rule conditions not met")
+	batchCache         = sync.Map{}       // Cache for storing batch rules
+	cacheExpiration    = 15 * time.Minute // Cache expiration time
 )
 
 type Rules struct {
@@ -21,9 +23,9 @@ type Rules struct {
 	TimeLimit      int `json:"timelimit"`
 }
 
-type CodeResult struct {
-	Code string
-	Err  error
+type CachedRules struct {
+	Rules     Rules
+	CacheTime time.Time
 }
 
 func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
@@ -66,8 +68,8 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 
-	var rules Rules
-	err = tx.QueryRow(ctx, "SELECT rules FROM batches WHERE id=$1", req.BatchID).Scan(&rules)
+	// Retrieve rules from cache or database
+	rules, err := getRulesForBatch(ctx, tx, req.BatchID)
 	if err != nil {
 		return "", err
 	}
@@ -91,4 +93,32 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 	}
 
 	return code, nil
+}
+
+func getRulesForBatch(ctx context.Context, tx pgx.Tx, batchID string) (Rules, error) {
+	// Check cache first
+	if cached, found := batchCache.Load(batchID); found {
+		cachedRules := cached.(CachedRules)
+		// Check if the cache is still valid
+		if time.Since(cachedRules.CacheTime) < cacheExpiration {
+			return cachedRules.Rules, nil
+		}
+		// Cache expired, delete it
+		batchCache.Delete(batchID)
+	}
+
+	// If not in cache or cache expired, fetch from database
+	var rules Rules
+	err := tx.QueryRow(ctx, "SELECT rules FROM batches WHERE id=$1", batchID).Scan(&rules)
+	if err != nil {
+		return Rules{}, err
+	}
+
+	// Store the fetched rules in cache
+	batchCache.Store(batchID, CachedRules{
+		Rules:     rules,
+		CacheTime: time.Now(),
+	})
+
+	return rules, nil
 }
