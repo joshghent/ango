@@ -12,7 +12,8 @@ import (
 const (
 	numRequests = 1000 // Total number of requests to send
 	concurrency = 100  // Number of concurrent requests
-	url         = "https://ango-73r94.ondigitalocean.app/api/get-code"
+	// url         = "https://ango-73r94.ondigitalocean.app/api/get-code"
+	url = "http://209.97.180.192:3000/api/get-code"
 )
 
 var (

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -60,12 +61,16 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 	defer tx.Rollback(ctx)
 
 	var code string
+	selectCodeTime := time.Now()
 	err = tx.QueryRow(ctx, "SELECT code FROM codes WHERE batch_id=$1 AND client_id=$2 AND customer_id IS NULL FOR UPDATE SKIP LOCKED LIMIT 1", req.BatchID, req.ClientID).Scan(&code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return "", ErrNoCodeFound
 		}
 		return "", err
+	}
+	if time.Now().Sub(selectCodeTime) > 100*time.Millisecond {
+		fmt.Printf("Query for selecting codes took too long (%v)ms", time.Now().Sub(selectCodeTime))
 	}
 
 	// Retrieve rules from cache or database
@@ -78,14 +83,22 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 		return "", ErrConditionNotMet
 	}
 
+	updateCodesTime := time.Now()
 	_, err = tx.Exec(ctx, "UPDATE codes SET customer_id=$1 WHERE code=$2", req.CustomerID, code)
 	if err != nil {
 		return "", err
 	}
+	if time.Now().Sub(updateCodesTime) > 100*time.Millisecond {
+		fmt.Printf("Query for updating codes took long (%v)ms", time.Now().Sub(updateCodesTime))
+	}
 
+	insertCodeUsageTime := time.Now()
 	_, err = tx.Exec(ctx, "INSERT INTO code_usage (code, batch_id, client_id, customer_id, used_at) VALUES ($1, $2, $3, $4, $5)", code, req.BatchID, req.ClientID, req.CustomerID, time.Now())
 	if err != nil {
 		return "", err
+	}
+	if time.Now().Sub(insertCodeUsageTime) > 100*time.Millisecond {
+		fmt.Printf("Query for inserting codes took long (%v)ms", time.Now().Sub(insertCodeUsageTime))
 	}
 
 	if err = tx.Commit(ctx); err != nil {
