@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
 
 const (
-	numRequests = 500 // Total number of requests to send
-	concurrency = 100 // Number of concurrent requests
+	numRequests = 1000 // Total number of requests to send
+	concurrency = 100  // Number of concurrent requests
 	url         = "https://ango-73r94.ondigitalocean.app/api/get-code"
 )
 
@@ -22,7 +23,7 @@ var (
 	}`)
 	codeMutex    sync.Mutex
 	codes        = make(map[string]struct{})
-	totalTime    time.Duration
+	times        []time.Duration
 	timeMutex    sync.Mutex
 	failedCount  int
 	failedMutex  sync.Mutex
@@ -69,8 +70,10 @@ func main() {
 					continue
 				}
 
+				timeTaken := time.Since(startTime)
+
 				timeMutex.Lock()
-				totalTime += time.Since(startTime)
+				times = append(times, timeTaken)
 				timeMutex.Unlock()
 
 				successMutex.Lock()
@@ -90,11 +93,29 @@ func main() {
 
 	wg.Wait()
 	duration := time.Since(start)
-	averageTime := totalTime / time.Duration(successCount)
+
+	// Sorting the times to calculate percentiles
+	sort.Slice(times, func(i, j int) bool {
+		return times[i] < times[j]
+	})
+
+	// Calculating percentiles
+	getPercentile := func(p int) time.Duration {
+		index := (p * len(times)) / 100
+		if index >= len(times) {
+			index = len(times) - 1
+		}
+		return times[index]
+	}
 
 	fmt.Printf("Completed %d requests in %v\n", numRequests, duration)
 	fmt.Printf("Total unique codes: %d\n", len(codes))
 	fmt.Printf("Total successful requests: %d\n", successCount)
 	fmt.Printf("Total failed requests: %d\n", failedCount)
-	fmt.Printf("Average time per successful request: %v\n", averageTime)
+	fmt.Printf("Average time per successful request: %v\n", duration/time.Duration(successCount))
+	fmt.Printf("50th percentile time: %v\n", getPercentile(50))
+	fmt.Printf("75th percentile time: %v\n", getPercentile(75))
+	fmt.Printf("90th percentile time: %v\n", getPercentile(90))
+	fmt.Printf("95th percentile time: %v\n", getPercentile(95))
+	fmt.Printf("99th percentile time: %v\n", getPercentile(99))
 }

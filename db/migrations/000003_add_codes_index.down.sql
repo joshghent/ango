@@ -1,0 +1,1 @@
+DROP index idx_code_usage_code_batch_client_customer;
