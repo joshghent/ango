@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof" // Register pprof handlers
@@ -17,6 +16,7 @@ import (
 var db *pgxpool.Pool
 
 func main() {
+	log.SetOutput(os.Stdout)
 	// Start pprof for profiling in a separate goroutine
 	go func() {
 		log.Println("Starting pprof on :6060")
@@ -115,7 +115,7 @@ func getCodeHandler(c *gin.Context) {
 		} else if err == ErrConditionNotMet {
 			c.JSON(403, gin.H{"error": "rule conditions not met"})
 		} else {
-			fmt.Printf("Error: %e", err)
+			log.Printf("Error: %e", err)
 			c.JSON(500, gin.H{"error": "database error"})
 		}
 		return

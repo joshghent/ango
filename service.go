@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -70,7 +70,7 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 	if time.Now().Sub(selectCodeTime) > 100*time.Millisecond {
-		fmt.Printf("Query for selecting codes took too long (%v)ms", time.Now().Sub(selectCodeTime))
+		log.Printf("Query for selecting codes took too long (%v)ms", time.Now().Sub(selectCodeTime))
 	}
 
 	// Retrieve rules from cache or database
@@ -89,7 +89,7 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 	if time.Now().Sub(updateCodesTime) > 100*time.Millisecond {
-		fmt.Printf("Query for updating codes took long (%v)ms", time.Now().Sub(updateCodesTime))
+		log.Printf("Query for updating codes took long (%v)ms", time.Now().Sub(updateCodesTime))
 	}
 
 	insertCodeUsageTime := time.Now()
@@ -98,7 +98,7 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 	if time.Now().Sub(insertCodeUsageTime) > 100*time.Millisecond {
-		fmt.Printf("Query for inserting codes took long (%v)ms", time.Now().Sub(insertCodeUsageTime))
+		log.Printf("Query for inserting codes took long (%v)ms", time.Now().Sub(insertCodeUsageTime))
 	}
 
 	if err = tx.Commit(ctx); err != nil {
