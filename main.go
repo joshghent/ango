@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof" // Register pprof handlers
 	"os"
 	"time"
 
@@ -15,6 +17,12 @@ import (
 var db *pgxpool.Pool
 
 func main() {
+	// Start pprof for profiling in a separate goroutine
+	go func() {
+		log.Println("Starting pprof on :6060")
+		http.ListenAndServe("localhost:6060", nil)
+	}()
+
 	var err error
 	db, err = connectToDB()
 	if err != nil {
@@ -49,7 +57,12 @@ func connectToDB() (*pgxpool.Pool, error) {
 	databaseURL := os.Getenv("DATABASE_URL")
 
 	for i := 0; i < maxRetries; i++ {
-		db, err = pgxpool.Connect(context.Background(), databaseURL)
+		config, _ := pgxpool.ParseConfig(databaseURL)
+		config.MaxConns = 20 // Adjust based on expected workload
+		config.MaxConnIdleTime = 30 * time.Minute
+		config.MaxConnLifetime = 2 * time.Hour
+
+		db, err = pgxpool.ConnectConfig(context.Background(), config)
 		if err == nil {
 			// Test the connection by querying the "batches" table
 			err = testDBConnection(db)
