@@ -115,7 +115,7 @@ func getCodeHandler(c *gin.Context) {
 		} else if err == ErrConditionNotMet {
 			c.JSON(403, gin.H{"error": "rule conditions not met"})
 		} else {
-			log.Printf("Error: %e", err)
+			log.Printf("Error: %v", err)
 			c.JSON(500, gin.H{"error": "database error"})
 		}
 		return

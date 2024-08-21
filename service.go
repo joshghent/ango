@@ -30,6 +30,7 @@ type CachedRules struct {
 }
 
 func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
+	log.Println("This is a test log")
 	// Validate UUIDs
 	if _, err := uuid.Parse(req.BatchID); err != nil {
 		return "", gin.Error{
