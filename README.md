@@ -39,6 +39,22 @@ Batches can have rules. These are super extensible, thanks to being JSON based.
 Out of the box we have functionality to limit codes to N per customer and within a time limit. For example, 2 per customer every month.
 This can be expanded but you will need to update the code in `checkRules`.
 
+#### Sample Batch Record
+
+Here's an example of a batch record with associated rules:
+```
+{
+  "id": "11111111-1111-1111-1111-111111111111",
+  "name": "Summer Sale",
+  "rules": {
+    "maxpercustomer": 1,
+    "timelimit": 30 // days - optional, defaults to unlimited
+  },
+  "expired": false
+}
+```
+
+
 ## Install / Setup
 
 ### To download

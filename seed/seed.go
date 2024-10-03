@@ -18,9 +18,9 @@ func main() {
 	defer db.Close()
 
 	_, err = db.Exec(`
-        INSERT INTO batches (id, rules) VALUES
-        ('11111111-1111-1111-1111-111111111111', '{"maxpercustomer": 1, "timelimit": 30}'),
-        ('22222222-2222-2222-2222-222222222222', '{"maxpercustomer": 2, "timelimit": 30}')
+        INSERT INTO batches (id, name, rules, expired) VALUES
+        ('11111111-1111-1111-1111-111111111111', 'Summer Sale', '{"maxpercustomer": 1, "timelimit": 30}', false),
+        ('22222222-2222-2222-2222-222222222222', 'Winter Promotion', '{"maxpercustomer": 2, "timelimit": 30}', false)
         ON CONFLICT DO NOTHING;
     `)
 	if err != nil {
