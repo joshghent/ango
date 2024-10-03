@@ -4,7 +4,7 @@ Ango - **means code 🧑‍💻 in Japanese** - is a lightweight code distributi
 
 ## The Numbers
 Ango has been load tested to death. That's what it's designed to do - handle huge volumes of load.
-The setup was two digitalocean VPS's running k8s with a load balancer in front.
+The setup was 
 Results
 ```
 
@@ -60,6 +60,9 @@ Here's an example of a batch record with associated rules:
 Locally, you can run Ango with docker compose:
 ```
 docker compose up -d
+
+# or in production
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 Then you can run the migrations and seed the database:
@@ -74,6 +77,10 @@ make test
 ```
 
 ### Integrating in your app
+Ango is designed to be whitelabel and unopionated. Here are some things you need to consider when integrating:
+* You will need to perform authentication prior to calling Ango's API.
+* Rate limiting is not included but can be added by you.
+* Integration can be done by simply spinning up Ango and using the API.
 
 ### Redeeming codes
 ```shell

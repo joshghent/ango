@@ -1,6 +1,6 @@
 .PHONY: migrate
 migrate:
-	migrate -path db/migrations -database "postgres://postgres:example@localhost:5432/ango?sslmode=disable" up
+	migrate -path db/migrations -database "${DATABASE_URL:-postgres://postgres:example@localhost:5432/ango?sslmode=disable}" up
 
 .PHONY: seed
 seed:
