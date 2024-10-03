@@ -125,6 +125,24 @@ func getCodeHandler(c *gin.Context) {
 }
 
 func checkRules(rules Rules, customerID string) bool {
-	// Implement logic to check maxpercustomer and time limit
-	return true
+	ctx := context.Background()
+
+	// Calculate the start date for the time limit
+	startDate := time.Now().AddDate(0, 0, -rules.TimeLimit)
+
+	// Query to count the number of codes used by the customer within the time limit
+	var count int
+	err := db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM code_usage
+		WHERE customer_id = $1 AND used_at >= $2
+	`, customerID, startDate).Scan(&count)
+
+	if err != nil {
+		log.Printf("Error checking rules: %v", err)
+		return false
+	}
+
+	// Check if the count is less than the maximum allowed per customer
+	return count < rules.MaxPerCustomer
 }
