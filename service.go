@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -181,4 +184,60 @@ func getBatches(ctx context.Context) ([]Batch, error) {
 		return nil, err
 	}
 	return batches, nil
+}
+
+func createBatch(ctx context.Context, name string, rules string) (string, error) {
+	// Generate a new UUID for the batch
+	batchID := uuid.New().String()
+
+	// Insert the new batch into the database
+	_, err := db.Exec(ctx, "INSERT INTO batches (id, name, rules) VALUES ($1, $2, $3)", batchID, name, rules)
+	if err != nil {
+		return "", err
+	}
+
+	return batchID, nil
+}
+
+func uploadCodes(ctx context.Context, file io.Reader, batchID string) error {
+	// Create a new CSV reader
+	reader := csv.NewReader(file)
+
+	// Read all CSV records
+	records, err := reader.ReadAll()
+	if err != nil {
+		return fmt.Errorf("error reading CSV: %v", err)
+	}
+
+	// Start a transaction
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("error starting transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Prepare the bulk insert statement
+	stmt := "INSERT INTO codes (client_id, batch_id, code) VALUES "
+	var values []interface{}
+	for i, record := range records[1:] { // Skip header row
+		if len(record) != 3 {
+			return fmt.Errorf("invalid record format at row %d", i+2)
+		}
+		stmt += fmt.Sprintf("($%d, $%d, $%d),", i*3+1, i*3+2, i*3+3)
+		values = append(values, record[0], batchID, record[2])
+	}
+	stmt = stmt[:len(stmt)-1] // Remove the trailing comma
+
+	// Execute the bulk insert
+	_, err = tx.Exec(ctx, stmt, values...)
+	if err != nil {
+		return fmt.Errorf("error executing bulk insert: %v", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
+	}
+
+	return nil
 }

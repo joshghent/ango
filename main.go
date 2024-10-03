@@ -6,6 +6,7 @@ import (
 	"net/http"
 	_ "net/http/pprof" // Register pprof handlers
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,9 +34,9 @@ func main() {
 
 	r := gin.Default()
 
-	r.POST("/api/get-code", getCodeHandler)
-	r.GET("/api/batches", getBatchesHandler)
-	r.POST("/api/upload-codes", uploadCodesHandler)
+	r.POST("/api/v1/code/redeem", getCodeHandler)
+	r.GET("/api/v1/batches", getBatchesHandler)
+	r.POST("/api/v1/codes/upload", uploadCodesHandler)
 
 	if err := r.Run(":3000"); err != nil {
 		log.Fatalf("Unable to start server: %v\n", err)
@@ -142,7 +143,48 @@ func getBatchesHandler(c *gin.Context) {
 	c.JSON(200, batches)
 }
 
-func uploadCodesHandler(c *gin.Context) {}
+func uploadCodesHandler(c *gin.Context) {
+	// Get the CSV file from the request
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(400, gin.H{"error": "No CSV file provided"})
+		return
+	}
+	defer file.Close()
+
+	// Check if the file is a CSV
+	if !strings.HasSuffix(header.Filename, ".csv") {
+		c.JSON(400, gin.H{"error": "File must be a CSV"})
+		return
+	}
+
+	// Get batch name from form data
+	batchName := c.PostForm("batch_name")
+	if batchName == "" {
+		c.JSON(400, gin.H{"error": "Batch name is required"})
+		return
+	}
+
+	// Get rules from form data (optional)
+	rules := c.PostForm("rules")
+
+	// Create a new batch with the given name and rules
+	batchID, err := createBatch(c.Request.Context(), batchName, rules)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to create batch: " + err.Error()})
+		return
+	}
+
+	// Call the service function to handle the upload
+	err = uploadCodes(c.Request.Context(), file, batchID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to upload codes: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Codes uploaded successfully"})
+
+}
 
 func checkRules(rules Rules, customerID string) bool {
 	ctx := context.Background()

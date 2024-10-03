@@ -1,12 +1,13 @@
-# **Ango (安居)**
+# **Ango (暗号)**
 
-Ango is a lightweight code distribution service built on Golang and Postgres. It's fully customisable and extensible to your needs.
+Ango - **means code 🧑‍💻 in Japanese** - is a lightweight code distribution service built on Golang and Postgres. It's fully customisable and extensible to your needs.
 
 ## The Numbers
 Ango has been load tested to death. That's what it's designed to do - handle huge volumes of load.
 The setup was two digitalocean VPS's running k8s with a load balancer in front.
 Results
 ```
+
 ```
 
 ## Use cases
@@ -23,7 +24,7 @@ Ango was designed to be flexible but has a reasonable opionated setup out of the
 Below are the key concepts to familiarise yourself with.
 
 ### Codes
-Codes is the primary place where we fetch and distribute codes from.
+Codes are the primary place where we fetch and distribute codes from.
 Codes can have certain rules associated with them (see below) and are associated with a particular batch and client.
 
 ### Batches
@@ -32,7 +33,7 @@ Batches are designed so that you can easily remove/expiry discount codes without
 Batches are always associated with clients and can have one or more codes.
 
 ### Clients
-Clients are your clients in your system. For example, if you are a ticketing business, you want to denote what codes are associated with which band that is performing - this would be marked with the client, with the performance being the "batch".
+Clients are **your** clients in **your** system. For example, if you are a ticketing business, you want to denote what codes are associated with which band that is performing - this would be marked with the client, with the performance being the "batch".
 
 ### Rules
 Batches can have rules. These are super extensible, thanks to being JSON based.
@@ -56,16 +57,68 @@ Here's an example of a batch record with associated rules:
 
 
 ## Install / Setup
+Locally, you can run Ango with docker compose:
+```
+docker compose up -d
+```
 
-### To download
+Then you can run the migrations and seed the database:
+```
+make migrate
+make seed
+```
 
 ### To test
+```
+make test
+```
 
 ### Integrating in your app
 
+### Redeeming codes
+```shell
+curl --request POST \
+  --url http://your-ango-server/api/v1/code/redeem \
+  --header 'content-type: application/json' \
+  --data '{
+  "batchid": "11111111-1111-1111-1111-111111111111",
+  "clientid": "217be7c8-679c-4e08-bffc-db3451bdcdbf",
+  "customerid": "50b0b41b-c665-4409-a2bb-a4fc18828dc2"
+}'
+
+# {
+#  "code": "73619c34-e941-4384-bb98-3a2ff094ddd0"
+# }
+```
+
+### Fetching batches
+
 ### Importing Codes via CSV
 
-## Why is it called Ango?
-Ango is a 3 month period of intensive study for zen buddists. I'm not one myself, but this project was a learning exercise for me to get better at golang. And it taught me a great deal about parallell computation.
+You can import codes into Ango using a CSV file through the `/api/v1/codes/upload` endpoint. Here's how to use it:
+
+1. Prepare your CSV file:
+   - The CSV should have two columns: `client_id`, and `code`.
+   - The first row should be the header row with these column names.
+   - Each subsequent row should contain the data for one code.
+
+2. Make a POST request to `/api/v1/codes/upload`:
+   - Use multipart/form-data as the content type.
+   - Include the following form fields:
+     - `file`: Your CSV file
+     - `batch_name`: The name of the batch you're creating
+     - `rules` (optional): A JSON string containing the rules for this batch
+
+3. Example using curl:
+   ```
+   curl -X POST http://your-ango-server/api/v1/codes/upload \
+     -F "file=@/path/to/your/codes.csv" \
+     -F "batch_name=Summer Sale 2023" \
+     -F 'rules={"maxpercustomer":2,"timelimit":30}'
+   ```
+
+4. The server will respond with a success message if the upload is successful, or an error message if there's a problem.
+
+Note: Ensure that your CSV file is properly formatted and that the client_ids in the CSV file exist in your system.
 
 ## License
