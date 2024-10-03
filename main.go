@@ -34,6 +34,8 @@ func main() {
 	r := gin.Default()
 
 	r.POST("/api/get-code", getCodeHandler)
+	r.GET("/api/batches", getBatchesHandler)
+	r.POST("/api/upload-codes", uploadCodesHandler)
 
 	if err := r.Run(":3000"); err != nil {
 		log.Fatalf("Unable to start server: %v\n", err)
@@ -48,6 +50,13 @@ type Request struct {
 
 type Code struct {
 	Code string `json:"code"`
+}
+
+type Batch struct {
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Rules Rules `json:"rules"`
+	Expired bool `json:"expired"`
 }
 
 func connectToDB() (*pgxpool.Pool, error) {
@@ -123,6 +132,17 @@ func getCodeHandler(c *gin.Context) {
 
 	c.JSON(200, Code{Code: code})
 }
+
+func getBatchesHandler(c *gin.Context) {
+	batches, err := getBatches(context.Background())
+	if err != nil {
+		c.JSON(500, gin.H{"error": "database error"})
+		return
+	}
+	c.JSON(200, batches)
+}
+
+func uploadCodesHandler(c *gin.Context) {}
 
 func checkRules(rules Rules, customerID string) bool {
 	ctx := context.Background()

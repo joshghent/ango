@@ -61,17 +61,40 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 	}
 	defer tx.Rollback(ctx)
 
-	var code string
 	selectCodeTime := time.Now()
-	err = tx.QueryRow(ctx, "SELECT code FROM codes WHERE batch_id=$1 AND client_id=$2 AND customer_id IS NULL FOR UPDATE SKIP LOCKED LIMIT 1", req.BatchID, req.ClientID).Scan(&code)
+
+	// First, check if the batch is expired
+	var batchExpired bool
+	err = tx.QueryRow(ctx, `
+		SELECT expired
+		FROM batches
+		WHERE id = $1
+	`, req.BatchID).Scan(&batchExpired)
+	if err != nil {
+		return "", err
+	}
+	if batchExpired {
+		return "", errors.New("batch is expired")
+	}
+
+	// If batch is not expired, proceed to select a code
+	var code string
+	err = tx.QueryRow(ctx, `
+		SELECT code
+		FROM codes
+		WHERE batch_id = $1 AND client_id = $2 AND customer_id IS NULL
+		FOR UPDATE SKIP LOCKED
+		LIMIT 1
+	`, req.BatchID, req.ClientID).Scan(&code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return "", ErrNoCodeFound
 		}
 		return "", err
 	}
-	if time.Now().Sub(selectCodeTime) > 100*time.Millisecond {
-		log.Printf("Query for selecting codes took too long (%v)ms", time.Now().Sub(selectCodeTime))
+
+	if time.Since(selectCodeTime) > 100*time.Millisecond {
+		log.Printf("Queries for checking batch expiration and selecting code took too long (%v)ms", time.Since(selectCodeTime))
 	}
 
 	// Retrieve rules from cache or database
@@ -135,4 +158,27 @@ func getRulesForBatch(ctx context.Context, tx pgx.Tx, batchID string) (Rules, er
 	})
 
 	return rules, nil
+}
+
+func getBatches(ctx context.Context) ([]Batch, error) {
+	rows, err := db.Query(ctx, "SELECT id, name, rules, expired FROM batches WHERE expired = false")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var batches []Batch
+	for rows.Next() {
+		var batch Batch
+		err := rows.Scan(&batch.ID, &batch.Name, &batch.Rules, &batch.Expired)
+		if err != nil {
+			return nil, err
+		}
+		batches = append(batches, batch)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return batches, nil
 }

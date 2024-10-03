@@ -1,0 +1,19 @@
+meta {
+  name: Get Batches
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://localhost:3000/api/batches
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "batchid": "11111111-1111-1111-1111-111111111111",
+    "clientid": "217be7c8-679c-4e08-bffc-db3451bdcdbf",
+    "customerid": "fba9230a-a521-430e-aaf8-8aefbf588071"
+  }
+}
