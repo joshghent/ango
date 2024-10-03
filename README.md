@@ -92,6 +92,31 @@ curl --request POST \
 ```
 
 ### Fetching batches
+```shell
+curl --request GET \
+  --url http://localhost:3000/api/v1/batches
+
+# [
+#   {
+#     "id": "11111111-1111-1111-1111-111111111111",
+#     "name": "Winter Batch",
+#     "rules": {
+#       "maxpercustomer": 1,
+#       "timelimit": 30 // days
+#     },
+#     "expired": false
+#   },
+#   {
+#     "id": "22222222-2222-2222-2222-222222222222",
+#     "name": "Summer Sale",
+#     "rules": {
+#       "maxpercustomer": 5,
+#       "timelimit": 90 // days
+#     },
+#     "expired": false
+#   }
+# ]
+```
 
 ### Importing Codes via CSV
 
@@ -122,3 +147,8 @@ You can import codes into Ango using a CSV file through the `/api/v1/codes/uploa
 Note: Ensure that your CSV file is properly formatted and that the client_ids in the CSV file exist in your system.
 
 ## License
+
+This project is licensed under the MIT License. This license allows businesses to use, modify, and distribute the software, provided they include the original copyright notice and disclaimer. The full text of the MIT License can be found at: https://opensource.org/licenses/MIT
+
+When using this software, please include the following attribution:
+"This product includes software developed by [Josh Ghent/Turbo Technologies] (https://github.com/joshghent/ango)."
