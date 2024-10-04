@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof" // Register pprof handlers
@@ -88,11 +89,24 @@ func connectToDB() (*pgxpool.Pool, error) {
 }
 
 func testDBConnection(db *pgxpool.Pool) error {
-	// Try to query the "batches" table to ensure the connection is working and permissions are sufficient
+	// Check if the required tables exist
+	tables := []string{"batches", "codes"}
+	for _, table := range tables {
+		var exists bool
+		err := db.QueryRow(context.Background(), "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)", table).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("error checking if table %s exists: %v", table, err)
+		}
+		if !exists {
+			return fmt.Errorf("required table %s does not exist", table)
+		}
+	}
+
+	// Test the connection by querying the database
 	var testResult int
-	err := db.QueryRow(context.Background(), "SELECT 1 FROM batches LIMIT 1").Scan(&testResult)
+	err := db.QueryRow(context.Background(), "SELECT 1").Scan(&testResult)
 	if err != nil {
-		return err
+		return fmt.Errorf("error testing database connection: %v", err)
 	}
 	return nil
 }
