@@ -33,7 +33,6 @@ type CachedRules struct {
 }
 
 func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
-	log.Println("This is a test log")
 	// Validate UUIDs
 	if _, err := uuid.Parse(req.BatchID); err != nil {
 		return "", gin.Error{
@@ -240,4 +239,67 @@ func uploadCodes(ctx context.Context, file io.Reader, batchID string) error {
 	}
 
 	return nil
+}
+
+type Rule interface {
+	Check(ctx context.Context, customerID string) bool
+}
+
+type NoRule struct{}
+
+func (r NoRule) Check(ctx context.Context, customerID string) bool {
+	return true
+}
+
+type MaxPerCustomerRule struct {
+	MaxCount  int
+	TimeLimit int // in days, 0 or null means no time limit
+}
+
+func (r MaxPerCustomerRule) Check(ctx context.Context, customerID string) bool {
+	query := `
+		SELECT COUNT(*)
+		FROM code_usage
+		WHERE customer_id = $1`
+	args := []interface{}{customerID}
+
+	if r.TimeLimit > 0 {
+		query += ` AND used_at >= $2`
+		args = append(args, time.Now().AddDate(0, 0, -r.TimeLimit))
+	}
+
+	var count int
+	err := db.QueryRow(ctx, query, args...).Scan(&count)
+
+	if err != nil {
+		log.Printf("Error checking MaxPerCustomerRule: %v", err)
+		return false
+	}
+
+	return count < r.MaxCount
+}
+
+func checkRules(rules Rules, customerID string) bool {
+	ctx := context.Background()
+
+	var ruleCheckers []Rule
+
+	if rules.MaxPerCustomer > 0 {
+		ruleCheckers = append(ruleCheckers, MaxPerCustomerRule{
+			MaxCount:  rules.MaxPerCustomer,
+			TimeLimit: rules.TimeLimit,
+		})
+	}
+
+	if len(ruleCheckers) == 0 {
+		ruleCheckers = append(ruleCheckers, NoRule{})
+	}
+
+	for _, rule := range ruleCheckers {
+		if !rule.Check(ctx, customerID) {
+			return false
+		}
+	}
+
+	return true
 }

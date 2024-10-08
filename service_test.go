@@ -122,12 +122,12 @@ func TestGetCodeHandler_InvalidJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/api/get-code", bytes.NewBuffer([]byte(tt.request)))
+			req := httptest.NewRequest("POST", "/api/v1/code/redeem", bytes.NewBuffer([]byte(tt.request)))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
 			router := gin.Default()
-			router.POST("/api/get-code", getCodeHandler)
+			router.POST("/api/v1/code/redeem", getCodeHandler)
 			router.ServeHTTP(w, req)
 
 			assert.Equal(t, 400, w.Code)
