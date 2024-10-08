@@ -132,7 +132,7 @@ func getCodeHandler(c *gin.Context) {
 		return
 	}
 
-	code, err := getCodeWithTimeout(context.Background(), req)
+	code, err := getCode(context.Background(), req)
 	if err != nil {
 		if err == ErrNoCodeFound {
 			c.JSON(404, gin.H{"error": "no code found"})

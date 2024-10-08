@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	ErrNoCodeFound     = errors.New("no code found")
-	ErrConditionNotMet = errors.New("rule conditions not met")
+	ErrNoCodeFound     = errors.New("no codes were found")
+	ErrConditionNotMet = errors.New("the request did not meet the rule conditions defined for the batch")
+	ErrNoBatchFound    = errors.New("no batch was found")
 	batchCache         = sync.Map{}       // Cache for storing batch rules
 	cacheExpiration    = 15 * time.Minute // Cache expiration time
 )
@@ -32,7 +33,7 @@ type CachedRules struct {
 	CacheTime time.Time
 }
 
-func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
+func getCode(ctx context.Context, req Request) (string, error) {
 	// Validate UUIDs
 	if _, err := uuid.Parse(req.BatchID); err != nil {
 		return "", gin.Error{
@@ -53,10 +54,6 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 		}
 	}
 
-	// Create a new context with a timeout
-	// ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
-	// defer cancel()
-
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -73,6 +70,9 @@ func getCodeWithTimeout(ctx context.Context, req Request) (string, error) {
 		WHERE id = $1
 	`, req.BatchID).Scan(&batchExpired)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", ErrNoBatchFound
+		}
 		return "", err
 	}
 	if batchExpired {

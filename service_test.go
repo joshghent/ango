@@ -32,7 +32,7 @@ func TestGetCodeWithTimeout(t *testing.T) {
 	}
 
 	t.Run("Successful Code Assignment", func(t *testing.T) {
-		code, err := getCodeWithTimeout(context.Background(), req)
+		code, err := getCode(context.Background(), req)
 		assert.Nil(t, err, "Expected no error")
 		assert.NotEmpty(t, code, "Expected code to be returned")
 	})
@@ -43,8 +43,8 @@ func TestGetCodeWithTimeout(t *testing.T) {
 			ClientID:   validClientID,
 			CustomerID: validCustomerID,
 		}
-		code, err := getCodeWithTimeout(context.Background(), req)
-		assert.Equal(t, ErrNoCodeFound, err, "Expected no code found error")
+		code, err := getCode(context.Background(), req)
+		assert.Equal(t, ErrNoBatchFound, err, "Expected no batch was found error")
 		assert.Empty(t, code, "Expected no code to be returned")
 	})
 
@@ -54,7 +54,7 @@ func TestGetCodeWithTimeout(t *testing.T) {
 			ClientID:   validClientID,
 			CustomerID: validCustomerID,
 		}
-		code, err := getCodeWithTimeout(context.Background(), req)
+		code, err := getCode(context.Background(), req)
 		assert.NotNil(t, err, "Expected error for invalid BatchID")
 		assert.Contains(t, err.Error(), "invalid batch_id format")
 		assert.Empty(t, code, "Expected no code to be returned")
@@ -66,7 +66,7 @@ func TestGetCodeWithTimeout(t *testing.T) {
 			ClientID:   "invalid-uuid",
 			CustomerID: validCustomerID,
 		}
-		code, err := getCodeWithTimeout(context.Background(), req)
+		code, err := getCode(context.Background(), req)
 		assert.NotNil(t, err, "Expected error for invalid ClientID")
 		assert.Contains(t, err.Error(), "invalid client_id format")
 		assert.Empty(t, code, "Expected no code to be returned")
@@ -78,7 +78,7 @@ func TestGetCodeWithTimeout(t *testing.T) {
 			ClientID:   validClientID,
 			CustomerID: "invalid-uuid",
 		}
-		code, err := getCodeWithTimeout(context.Background(), req)
+		code, err := getCode(context.Background(), req)
 		assert.NotNil(t, err, "Expected error for invalid CustomerID")
 		assert.Contains(t, err.Error(), "invalid customer_id format")
 		assert.Empty(t, code, "Expected no code to be returned")
