@@ -10,6 +10,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
     - uses: actions/checkout@v4
 
@@ -21,5 +34,14 @@ jobs:
     - name: Install dependencies
       run: go mod download
 
+    - name: Run migrations and seed data
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      run: |
+        make migrate
+        make seed
+
     - name: Run tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable
       run: make test
