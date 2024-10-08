@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"log"
 	"net/http"
@@ -212,4 +213,18 @@ func uploadCodesHandler(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"message": "Codes uploaded successfully"})
+}
+
+// Used to check if the CSV contains the required columns
+func containsColumns(headers []string, requiredColumns []string) bool {
+	headerSet := make(map[string]bool)
+	for _, h := range headers {
+		headerSet[h] = true
+	}
+	for _, rc := range requiredColumns {
+		if !headerSet[rc] {
+			return false
+		}
+	}
+	return true
 }

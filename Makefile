@@ -17,3 +17,7 @@ test:
 .PHONY: loadtest
 loadtest:
 	go run loadtest/main.go
+
+.PHONY: build
+build:
+	go build -o main .
