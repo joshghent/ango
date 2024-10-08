@@ -5,8 +5,9 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
-	"net/http"
-	_ "net/http/pprof" // Register pprof handlers
+
+	// "net/http"
+	// _ "net/http/pprof" // Register pprof handlers
 	"os"
 	"strings"
 	"time"
@@ -20,11 +21,10 @@ var db *pgxpool.Pool
 
 func main() {
 	log.SetOutput(os.Stdout)
-	// Start pprof for profiling in a separate goroutine
-	go func() {
-		log.Println("Starting pprof on :6060")
-		http.ListenAndServe(":6060", nil)
-	}()
+	// go func() {
+	// 	log.Println("Starting pprof on :6060")
+	// 	http.ListenAndServe(":6060", nil)
+	// }()
 
 	var err error
 	db, err = connectToDB()
@@ -33,6 +33,8 @@ func main() {
 	}
 	defer db.Close()
 	log.Println("Connected to the database successfully.")
+
+	go monitorDBConnections(db)
 
 	r := gin.Default()
 
@@ -73,6 +75,8 @@ func connectToDB() (*pgxpool.Pool, error) {
 		config.MaxConns = 20 // Adjust based on expected workload
 		config.MaxConnIdleTime = 30 * time.Minute
 		config.MaxConnLifetime = 2 * time.Hour
+		config.HealthCheckPeriod = 1 * time.Minute // Add health check period
+		config.ConnConfig.ConnectTimeout = 5 * time.Second // Add connection timeout
 
 		db, err = pgxpool.ConnectConfig(context.Background(), config)
 		if err == nil {
@@ -81,12 +85,61 @@ func connectToDB() (*pgxpool.Pool, error) {
 			if err == nil {
 				break
 			}
+			// Test the connection by querying the database
+			var testResult int
+			err = db.QueryRow(context.Background(), "SELECT 1").Scan(&testResult)
+			if err != nil {
+				return nil, fmt.Errorf("error testing database connection: %v", err)
+			}
 		}
 		log.Printf("Error connecting to database (attempt %d/%d): %v\nDatabase URL: %s", i+1, maxRetries, err, databaseURL)
 		time.Sleep(5 * time.Second)
 	}
 
 	return db, err
+}
+
+func monitorDBConnections(pool *pgxpool.Pool) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		stats := pool.Stat()
+		log.Printf("DB Pool Stats - Total: %d, Idle: %d, In Use: %d, Max: %d",
+			stats.TotalConns(), stats.IdleConns(), stats.AcquiredConns(), stats.MaxConns())
+
+		// Close idle connections
+		pool.AcquireAllIdle(context.Background())
+
+		// Check for stalled connections and reset them
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := pool.AcquireFunc(ctx, func(conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, "SELECT 1")
+			if err != nil {
+				log.Printf("Resetting stalled connection: %v", err)
+				conn.Hijack()
+			}
+			return nil
+		})
+		cancel()
+		if err != nil {
+			log.Printf("Error checking for stalled connections: %v", err)
+		}
+
+		// Check for long-running transactions
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		_, err = pool.Exec(ctx, `
+			SELECT pg_terminate_backend(pid)
+			FROM pg_stat_activity
+			WHERE state = 'active'
+			  AND state_change < NOW() - INTERVAL '30 seconds'
+			  AND query NOT LIKE '%pg_terminate_backend%'
+		`)
+		cancel()
+		if err != nil {
+			log.Printf("Error terminating long-running transactions: %v", err)
+		}
+	}
 }
 
 func testDBConnection(db *pgxpool.Pool) error {
