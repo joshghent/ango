@@ -4,7 +4,7 @@ migrate:
 
 .PHONY: seed
 seed:
-	go run seed/seed.go
+	go run db/seed/seed.go
 
 .PHONY: run
 run:

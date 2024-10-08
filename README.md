@@ -72,6 +72,7 @@ make seed
 ```
 
 ### To test
+Please note that the test suite requires a postgres instance running locally and seeded with the data in the `seed` folder.
 ```
 make test
 ```
