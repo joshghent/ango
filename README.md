@@ -4,7 +4,7 @@ Ango - **means code 🧑‍💻 in Japanese** - is a lightweight code distributi
 
 ## The Numbers
 Ango has been load tested to death. That's what it's designed to do - handle huge volumes of load.
-The setup was 
+The setup was
 Results
 ```
 
@@ -75,6 +75,13 @@ make seed
 ```
 make test
 ```
+
+### To create a migration
+We use the db-migrate tool to manage migrations.
+```
+migrate create -ext sql -dir db/migrations -seq <name>
+```
+
 
 ### Integrating in your app
 Ango is designed to be whitelabel and unopionated. Here are some things you need to consider when integrating:
