@@ -20,9 +20,9 @@ func main() {
 	_, err = db.Exec(`
         INSERT INTO batches (id, name, rules, expired) VALUES
         ('11111111-1111-1111-1111-111111111111', 'Summer Sale', '{"maxpercustomer": 1, "timelimit": 30}', false),
-        ('22222222-2222-2222-2222-222222222222', 'Winter Promotion', '{"maxpercustomer": 2, "timelimit": 30}', false)
-				('33333333-3333-3333-3333-333333333333', 'Exhausted Batch', '', false)
-				('44444444-4444-4444-4444-444444444444', 'Expired Batch', '', true)
+        ('22222222-2222-2222-2222-222222222222', 'Winter Promotion', '{"maxpercustomer": 2, "timelimit": 30}', false),
+        ('33333333-3333-3333-3333-333333333333', 'Exhausted Batch', null, false),
+        ('44444444-4444-4444-4444-444444444444', 'Expired Batch', null, true)
         ON CONFLICT DO NOTHING;
     `)
 	if err != nil {
@@ -45,15 +45,15 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to insert into codes: %v\n", err)
 		}
+	}
 
-		_, err = db.Exec(`
+	_, err = db.Exec(`
             INSERT INTO codes (code, batch_id, client_id, customer_id) VALUES ($1, $2, $3, $4)
             ON CONFLICT DO NOTHING;
-        `, uuid.New().String(), "33333333-3333-3333-3333-333333333333", "2ee73a08-ac6f-457d-934f-dcbc61840ae6", "c3cf4ae6-775c-49c1-8006-c5fdc1f561f5")
+        `, uuid.New().String(), "33333333-3333-3333-3333-333333333333", "2ee73a08-ac6f-457d-934f-dcbc61840ae6", uuid.New().String())
 		if err != nil {
 			log.Fatalf("Failed to insert into codes: %v\n", err)
 		}
-	}
 
 	fmt.Println("Database seeded successfully")
 }
