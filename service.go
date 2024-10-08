@@ -19,6 +19,7 @@ var (
 	ErrNoCodeFound     = errors.New("no codes were found")
 	ErrConditionNotMet = errors.New("the request did not meet the rule conditions defined for the batch")
 	ErrNoBatchFound    = errors.New("no batch was found")
+	ErrBatchExpired   = errors.New("the batch is expired")
 	batchCache         = sync.Map{}       // Cache for storing batch rules
 	cacheExpiration    = 15 * time.Minute // Cache expiration time
 )
@@ -76,7 +77,7 @@ func getCode(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 	if batchExpired {
-		return "", errors.New("batch is expired")
+		return "", ErrBatchExpired
 	}
 
 	// If batch is not expired, proceed to select a code

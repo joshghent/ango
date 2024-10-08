@@ -49,6 +49,28 @@ func TestGetCodeWithTimeout(t *testing.T) {
 		assert.Empty(t, code, "Expected no code to be returned")
 	})
 
+	t.Run("No Code Found when all are used in the batch", func(t *testing.T) {
+		req := Request{
+			BatchID:    "33333333-3333-3333-3333-333333333333",
+			ClientID:   validClientID,
+			CustomerID: validCustomerID,
+		}
+		code, err := getCode(context.Background(), req)
+		assert.Equal(t, ErrNoCodeFound, err, "Expected no code was found error")
+		assert.Empty(t, code, "Expected no code to be returned")
+	})
+
+	t.Run("Responds when the batch is expired", func(t *testing.T) {
+		req := Request{
+			BatchID:    "44444444-4444-4444-4444-444444444444",
+			ClientID:   validClientID,
+			CustomerID: validCustomerID,
+		}
+		code, err := getCode(context.Background(), req)
+		assert.Equal(t, ErrBatchExpired, err, "Expected batch expired error")
+		assert.Empty(t, code, "Expected no code to be returned")
+	})
+
 	t.Run("Invalid BatchID", func(t *testing.T) {
 		req := Request{
 			BatchID:    "invalid-uuid",
