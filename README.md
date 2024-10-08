@@ -65,6 +65,11 @@ docker compose up -d
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+Then we need to install some tools locally
+```
+brew install protoc-gen-go-grpc golang-migrate
+```
+
 Then you can run the migrations and seed the database:
 ```
 make migrate
@@ -78,8 +83,9 @@ make test
 ```
 
 ### To create a migration
-We use the db-migrate tool to manage migrations.
+We use the golang/db-migrate tool to manage migrations.
 ```
+# Create the migration
 migrate create -ext sql -dir db/migrations -seq <name>
 ```
 
