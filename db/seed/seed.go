@@ -29,7 +29,7 @@ func main() {
 		log.Fatalf("Failed to insert into batches: %v\n", err)
 	}
 
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 100; i++ {
 		_, err = db.Exec(`
             INSERT INTO codes (code, batch_id, client_id) VALUES ($1, $2, $3)
             ON CONFLICT DO NOTHING;
