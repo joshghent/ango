@@ -21,6 +21,7 @@ func TestGetCodeWithTimeout(t *testing.T) {
 	defer db.Close()
 
 	// Generate valid UUIDs for testing
+	// This is based on the seed data
 	validBatchID := "11111111-1111-1111-1111-111111111111"
 	validClientID := "217be7c8-679c-4e08-bffc-db3451bdcdbf"
 	validCustomerID := uuid.New().String()
@@ -37,7 +38,7 @@ func TestGetCodeWithTimeout(t *testing.T) {
 		assert.NotEmpty(t, code, "Expected code to be returned")
 	})
 
-	t.Run("No Code Found", func(t *testing.T) {
+	t.Run("No Batch Found", func(t *testing.T) {
 		req := Request{
 			BatchID:    uuid.New().String(),
 			ClientID:   validClientID,
