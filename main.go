@@ -72,24 +72,17 @@ func connectToDB() (*pgxpool.Pool, error) {
 
 	for i := 0; i < maxRetries; i++ {
 		config, _ := pgxpool.ParseConfig(databaseURL)
-		config.MaxConns = 20 // Adjust based on expected workload
-		config.MaxConnIdleTime = 30 * time.Minute
-		config.MaxConnLifetime = 2 * time.Hour
-		config.HealthCheckPeriod = 1 * time.Minute // Add health check period
-		config.ConnConfig.ConnectTimeout = 5 * time.Second // Add connection timeout
+		config.MaxConns = 20
+		config.MaxConnIdleTime = 30 * time.Second // Reduced from 30 minutes
+		config.MaxConnLifetime = 1 * time.Hour // Reduced from 2 hours
+		config.HealthCheckPeriod = 1 * time.Minute
+		config.ConnConfig.ConnectTimeout = 5 * time.Second
 
 		db, err = pgxpool.ConnectConfig(context.Background(), config)
 		if err == nil {
-			// Test the connection by querying the "batches" table
 			err = testDBConnection(db)
 			if err == nil {
 				break
-			}
-			// Test the connection by querying the database
-			var testResult int
-			err = db.QueryRow(context.Background(), "SELECT 1").Scan(&testResult)
-			if err != nil {
-				return nil, fmt.Errorf("error testing database connection: %v", err)
 			}
 		}
 		log.Printf("Error connecting to database (attempt %d/%d): %v\nDatabase URL: %s", i+1, maxRetries, err, databaseURL)
@@ -100,7 +93,7 @@ func connectToDB() (*pgxpool.Pool, error) {
 }
 
 func monitorDBConnections(pool *pgxpool.Pool) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second) // Increased frequency
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -131,7 +124,7 @@ func monitorDBConnections(pool *pgxpool.Pool) {
 		_, err = pool.Exec(ctx, `
 			SELECT pg_terminate_backend(pid)
 			FROM pg_stat_activity
-			WHERE state = 'active'
+			WHERE state = 'idle in transaction'
 			  AND state_change < NOW() - INTERVAL '30 seconds'
 			  AND query NOT LIKE '%pg_terminate_backend%'
 		`)

@@ -55,6 +55,9 @@ func getCode(ctx context.Context, req Request) (string, error) {
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -115,8 +118,8 @@ func getCode(ctx context.Context, req Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if time.Now().Sub(updateCodesTime) > 100*time.Millisecond {
-		log.Printf("Query for updating codes took long (%v)ms", time.Now().Sub(updateCodesTime))
+	if time.Since(updateCodesTime) > 100*time.Millisecond {
+		log.Printf("Query for updating codes took long (%v)ms", time.Since(updateCodesTime))
 	}
 
 	insertCodeUsageTime := time.Now()
@@ -124,8 +127,8 @@ func getCode(ctx context.Context, req Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if time.Now().Sub(insertCodeUsageTime) > 100*time.Millisecond {
-		log.Printf("Query for inserting codes took long (%v)ms", time.Now().Sub(insertCodeUsageTime))
+	if time.Since(insertCodeUsageTime) > 100*time.Millisecond {
+		log.Printf("Query for inserting codes took long (%v)ms", time.Since(insertCodeUsageTime))
 	}
 
 	if err = tx.Commit(ctx); err != nil {
