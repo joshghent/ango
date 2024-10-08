@@ -224,7 +224,7 @@ func uploadCodes(ctx context.Context, file io.Reader, batchID string) error {
 			return fmt.Errorf("invalid record format at row %d", i+2)
 		}
 		stmt += fmt.Sprintf("($%d, $%d, $%d),", i*3+1, i*3+2, i*3+3)
-		values = append(values, record[0], batchID, record[2])
+		values = append(values, record[0], batchID, record[1])
 	}
 	stmt = stmt[:len(stmt)-1] // Remove the trailing comma
 

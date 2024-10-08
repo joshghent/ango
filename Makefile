@@ -13,3 +13,7 @@ run:
 .PHONY: test
 test:
 	go test ./...
+
+.PHONY: loadtest
+loadtest:
+	go run loadtest/main.go

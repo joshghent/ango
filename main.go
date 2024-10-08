@@ -172,6 +172,21 @@ func uploadCodesHandler(c *gin.Context) {
 		return
 	}
 
+	// Check if the CSV contains required columns
+	csvReader := csv.NewReader(file)
+	headers, err := csvReader.Read()
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Failed to read CSV headers"})
+		return
+	}
+	if !containsColumns(headers, []string{"code", "client_id"}) {
+		c.JSON(400, gin.H{"error": "CSV must contain 'code' and 'client_id' columns"})
+		return
+	}
+
+	// Reset file pointer to the beginning
+	file.Seek(0, 0)
+
 	// Get batch name from form data
 	batchName := c.PostForm("batch_name")
 	if batchName == "" {
@@ -197,5 +212,4 @@ func uploadCodesHandler(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"message": "Codes uploaded successfully"})
-
 }

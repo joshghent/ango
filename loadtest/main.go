@@ -2,26 +2,31 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
 	numRequests = 1000 // Total number of requests to send
 	concurrency = 100  // Number of concurrent requests
-	// url         = "https://ango-73r94.ondigitalocean.app/api/get-code"
-	url = "http://209.97.180.192:3000/api/get-code"
+	url = "http://e80048okk804gs0k8o8c8css.209.97.180.192.sslip.io/api/v1/code/redeem"
 )
 
 var (
-	jsonData = []byte(`{
-		"batchid": "11111111-1111-1111-1111-111111111111",
-		"clientid": "217be7c8-679c-4e08-bffc-db3451bdcdbf",
-		"customerid": "fba9230a-a521-430e-aaf8-8aefbf588071"
-	}`)
+	jsonTemplate = struct {
+		BatchID    string `json:"batchid"`
+		ClientID   string `json:"clientid"`
+		CustomerID string `json:"customerid"`
+	}{
+		BatchID:  "11111111-1111-1111-1111-111111111111",
+		ClientID: "217be7c8-679c-4e08-bffc-db3451bdcdbf",
+	}
 	codeMutex    sync.Mutex
 	codes        = make(map[string]struct{})
 	times        []time.Duration
@@ -42,6 +47,10 @@ func main() {
 			defer wg.Done()
 			for j := 0; j < numRequests/concurrency; j++ {
 				startTime := time.Now()
+
+				// Generate a new UUID for each request
+				jsonTemplate.CustomerID = uuid.New().String()
+				jsonData, _ := json.Marshal(jsonTemplate)
 
 				resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
 				if err != nil {
