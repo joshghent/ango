@@ -38,6 +38,7 @@ func main() {
 
 	r := gin.Default()
 
+	r.GET("/healthcheck", healthcheckHandler)
 	r.POST("/api/v1/code/redeem", getCodeHandler)
 	r.GET("/api/v1/batches", getBatchesHandler)
 	r.POST("/api/v1/codes/upload", uploadCodesHandler)
@@ -273,4 +274,15 @@ func containsColumns(headers []string, requiredColumns []string) bool {
 		}
 	}
 	return true
+}
+
+// Add this new function at the end of the file
+func healthcheckHandler(c *gin.Context) {
+	err := db.Ping(context.Background())
+	if err != nil {
+		log.Printf("Healthcheck failed: %v", err)
+		c.JSON(500, gin.H{"status": "unhealthy", "message": "Unable to connect to the database"})
+		return
+	}
+	c.JSON(200, gin.H{"status": "healthy", "message": "System is operational"})
 }
