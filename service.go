@@ -31,121 +31,119 @@ type Rules struct {
 
 type CachedRules struct {
 	Rules     Rules
+	Expired   bool
 	CacheTime time.Time
 }
 
 func getCode(ctx context.Context, req Request) (string, error) {
-	// Validate UUIDs
-	if _, err := uuid.Parse(req.BatchID); err != nil {
-		return "", gin.Error{
-			Err:  errors.New("invalid batch_id format"),
-			Type: gin.ErrorTypePublic,
-		}
-	}
-	if _, err := uuid.Parse(req.ClientID); err != nil {
-		return "", gin.Error{
-			Err:  errors.New("invalid client_id format"),
-			Type: gin.ErrorTypePublic,
-		}
-	}
-	if _, err := uuid.Parse(req.CustomerID); err != nil {
-		return "", gin.Error{
-			Err:  errors.New("invalid customer_id format"),
-			Type: gin.ErrorTypePublic,
-		}
-	}
+    // Validate UUIDs
+    if _, err := uuid.Parse(req.BatchID); err != nil {
+        return "", gin.Error{
+            Err:  errors.New("invalid batch_id format"),
+            Type: gin.ErrorTypePublic,
+        }
+    }
+    if _, err := uuid.Parse(req.ClientID); err != nil {
+        return "", gin.Error{
+            Err:  errors.New("invalid client_id format"),
+            Type: gin.ErrorTypePublic,
+        }
+    }
+    if _, err := uuid.Parse(req.CustomerID); err != nil {
+        return "", gin.Error{
+            Err:  errors.New("invalid customer_id format"),
+            Type: gin.ErrorTypePublic,
+        }
+    }
 
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second) // Extended timeout
-	defer cancel()
+    ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+    defer cancel()
 
-	// Check batch expiration outside of the transaction
-	var batchExpired bool
-	err := db.QueryRow(ctx, `
-		SELECT expired
-		FROM batches
-		WHERE id = $1
-	`, req.BatchID).Scan(&batchExpired)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return "", ErrNoBatchFound
-		}
-		return "", err
-	}
-	if batchExpired {
-		return "", ErrBatchExpired
-	}
+    // Check batch expiration from cache
+    rules, batchExpired, err := getRulesForBatch(ctx, req.BatchID)
+    if err != nil {
+        if err == pgx.ErrNoRows {
+            return "", ErrNoBatchFound
+        }
+        return "", err
+    }
+    if batchExpired {
+        return "", ErrBatchExpired
+    }
 
-	// Begin transaction after initial check
-	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback(ctx) // Ensure rollback if not committed
+    // Begin transaction after initial check
+    tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+    if err != nil {
+        return "", err
+    }
+    defer func() {
+        if tx != nil {
+            tx.Rollback(ctx) // Ensure rollback if not committed
+        }
+    }()
 
-	selectCodeTime := time.Now()
+    selectCodeTime := time.Now()
 
-	// Attempt to acquire a code
-	var code string
-	err = tx.QueryRow(ctx, `
-		SELECT code
-		FROM codes
-		WHERE batch_id = $1 AND client_id = $2 AND customer_id IS NULL
-		FOR NO KEY UPDATE SKIP LOCKED
-		LIMIT 1
-	`, req.BatchID, req.ClientID).Scan(&code)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return "", ErrNoCodeFound
-		}
-		return "", err
-	}
+    // Attempt to acquire a code
+    var code string
+    err = tx.QueryRow(ctx, `
+        SELECT code
+        FROM codes
+        WHERE batch_id = $1 AND client_id = $2 AND customer_id IS NULL
+        FOR NO KEY UPDATE SKIP LOCKED
+        LIMIT 1
+    `, req.BatchID, req.ClientID).Scan(&code)
+    if err != nil {
+        if err == pgx.ErrNoRows {
+            return "", ErrNoCodeFound
+        }
+        return "", err
+    }
 
-	if time.Since(selectCodeTime) > 100*time.Millisecond {
-		log.Printf("Queries for selecting code took too long (%v)ms", time.Since(selectCodeTime))
-	}
+    if time.Since(selectCodeTime) > 100*time.Millisecond {
+        log.Printf("Queries for selecting code took too long (%v)ms", time.Since(selectCodeTime))
+    }
 
-	// Retrieve rules from cache or database
-	rules, err := getRulesForBatch(ctx, tx, req.BatchID)
-	if err != nil {
-		return "", err
-	}
+    if !checkRules(rules, req.CustomerID) {
+        return "", ErrConditionNotMet
+    }
 
-	if !checkRules(rules, req.CustomerID) {
-		return "", ErrConditionNotMet
-	}
+    // Code usage updates
+    updateCodesTime := time.Now()
+    _, err = tx.Exec(ctx, "UPDATE codes SET customer_id=$1 WHERE code=$2", req.CustomerID, code)
+    if err != nil {
+        return "", err
+    }
+    if time.Since(updateCodesTime) > 100*time.Millisecond {
+        log.Printf("Query for updating codes took too long (%v)ms", time.Since(updateCodesTime))
+    }
 
-	updateCodesTime := time.Now()
-	_, err = tx.Exec(ctx, "UPDATE codes SET customer_id=$1 WHERE code=$2", req.CustomerID, code)
-	if err != nil {
-		return "", err
-	}
-	if time.Since(updateCodesTime) > 100*time.Millisecond {
-		log.Printf("Query for updating codes took too long (%v)ms", time.Since(updateCodesTime))
-	}
+		// Remove code usage because it's not needed, will queue for later.
+    // insertCodeUsageTime := time.Now()
+    // _, err = tx.Exec(ctx, "INSERT INTO code_usage (code, batch_id, client_id, customer_id, used_at) VALUES ($1, $2, $3, $4, $5)", code, req.BatchID, req.ClientID, req.CustomerID, time.Now())
+    // if err != nil {
+    //     return "", err
+    // }
+    // if time.Since(insertCodeUsageTime) > 100*time.Millisecond {
+    //     log.Printf("Query for inserting code usage took too long (%v)ms", time.Since(insertCodeUsageTime))
+    // }
 
-	insertCodeUsageTime := time.Now()
-	_, err = tx.Exec(ctx, "INSERT INTO code_usage (code, batch_id, client_id, customer_id, used_at) VALUES ($1, $2, $3, $4, $5)", code, req.BatchID, req.ClientID, req.CustomerID, time.Now())
-	if err != nil {
-		return "", err
-	}
-	if time.Since(insertCodeUsageTime) > 100*time.Millisecond {
-		log.Printf("Query for inserting code usage took too long (%v)ms", time.Since(insertCodeUsageTime))
-	}
+    if err = tx.Commit(ctx); err != nil {
+        return "", err
+    }
+    tx = nil // Avoid rollback
 
-	if err = tx.Commit(ctx); err != nil {
-		return "", err
-	}
-
-	return code, nil
+    return code, nil
 }
 
-func getRulesForBatch(ctx context.Context, tx pgx.Tx, batchID string) (Rules, error) {
+
+func getRulesForBatch(ctx context.Context, batchID string) (Rules, bool, error) {
 	// Check cache first
 	if cached, found := batchCache.Load(batchID); found {
 		cachedRules := cached.(CachedRules)
 		// Check if the cache is still valid
 		if time.Since(cachedRules.CacheTime) < cacheExpiration {
-			return cachedRules.Rules, nil
+			return cachedRules.Rules, cachedRules.Expired, nil
 		}
 		// Cache expired, delete it
 		batchCache.Delete(batchID)
@@ -153,18 +151,20 @@ func getRulesForBatch(ctx context.Context, tx pgx.Tx, batchID string) (Rules, er
 
 	// If not in cache or cache expired, fetch from database
 	var rules Rules
-	err := tx.QueryRow(ctx, "SELECT rules FROM batches WHERE id=$1", batchID).Scan(&rules)
+	var expired bool
+	err := db.QueryRow(ctx, "SELECT rules, expired FROM batches WHERE id=$1", batchID).Scan(&rules, &expired)
 	if err != nil {
-		return Rules{}, err
+		return Rules{}, false, err
 	}
 
 	// Store the fetched rules in cache
 	batchCache.Store(batchID, CachedRules{
 		Rules:     rules,
+		Expired:   expired,
 		CacheTime: time.Now(),
 	})
 
-	return rules, nil
+	return rules, expired, nil
 }
 
 func getBatches(ctx context.Context) ([]Batch, error) {

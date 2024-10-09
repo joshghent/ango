@@ -73,9 +73,9 @@ func connectToDB() (*pgxpool.Pool, error) {
 
 	for i := 0; i < maxRetries; i++ {
 		config, _ := pgxpool.ParseConfig(databaseURL)
-		config.MaxConns = 20
-		config.MaxConnIdleTime = 30 * time.Second // Reduced from 30 minutes
-		config.MaxConnLifetime = 1 * time.Hour // Reduced from 2 hours
+		config.MaxConns = 50
+		config.MaxConnIdleTime = 30 * time.Second
+		config.MaxConnLifetime = 1 * time.Hour
 		config.HealthCheckPeriod = 1 * time.Minute
 		config.ConnConfig.ConnectTimeout = 5 * time.Second
 
