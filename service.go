@@ -55,20 +55,12 @@ func getCode(ctx context.Context, req Request) (string, error) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second) // Extended timeout
 	defer cancel()
 
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback(ctx)
-
-	selectCodeTime := time.Now()
-
-	// First, check if the batch is expired
+	// Check batch expiration outside of the transaction
 	var batchExpired bool
-	err = tx.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT expired
 		FROM batches
 		WHERE id = $1
@@ -83,13 +75,22 @@ func getCode(ctx context.Context, req Request) (string, error) {
 		return "", ErrBatchExpired
 	}
 
-	// If batch is not expired, proceed to select a code
+	// Begin transaction after initial check
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx) // Ensure rollback if not committed
+
+	selectCodeTime := time.Now()
+
+	// Attempt to acquire a code
 	var code string
 	err = tx.QueryRow(ctx, `
 		SELECT code
 		FROM codes
 		WHERE batch_id = $1 AND client_id = $2 AND customer_id IS NULL
-		FOR UPDATE SKIP LOCKED
+		FOR NO KEY UPDATE SKIP LOCKED
 		LIMIT 1
 	`, req.BatchID, req.ClientID).Scan(&code)
 	if err != nil {
@@ -100,7 +101,7 @@ func getCode(ctx context.Context, req Request) (string, error) {
 	}
 
 	if time.Since(selectCodeTime) > 100*time.Millisecond {
-		log.Printf("Queries for checking batch expiration and selecting code took too long (%v)ms", time.Since(selectCodeTime))
+		log.Printf("Queries for selecting code took too long (%v)ms", time.Since(selectCodeTime))
 	}
 
 	// Retrieve rules from cache or database
@@ -119,7 +120,7 @@ func getCode(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 	if time.Since(updateCodesTime) > 100*time.Millisecond {
-		log.Printf("Query for updating codes took long (%v)ms", time.Since(updateCodesTime))
+		log.Printf("Query for updating codes took too long (%v)ms", time.Since(updateCodesTime))
 	}
 
 	insertCodeUsageTime := time.Now()
@@ -128,7 +129,7 @@ func getCode(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 	if time.Since(insertCodeUsageTime) > 100*time.Millisecond {
-		log.Printf("Query for inserting codes took long (%v)ms", time.Since(insertCodeUsageTime))
+		log.Printf("Query for inserting code usage took too long (%v)ms", time.Since(insertCodeUsageTime))
 	}
 
 	if err = tx.Commit(ctx); err != nil {

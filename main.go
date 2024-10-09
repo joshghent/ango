@@ -94,7 +94,7 @@ func connectToDB() (*pgxpool.Pool, error) {
 }
 
 func monitorDBConnections(pool *pgxpool.Pool) {
-	ticker := time.NewTicker(30 * time.Second) // Increased frequency
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -102,11 +102,8 @@ func monitorDBConnections(pool *pgxpool.Pool) {
 		log.Printf("DB Pool Stats - Total: %d, Idle: %d, In Use: %d, Max: %d",
 			stats.TotalConns(), stats.IdleConns(), stats.AcquiredConns(), stats.MaxConns())
 
-		// Close idle connections
-		pool.AcquireAllIdle(context.Background())
-
-		// Check for stalled connections and reset them
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Check and reset stalled connections with extended timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err := pool.AcquireFunc(ctx, func(conn *pgxpool.Conn) error {
 			_, err := conn.Exec(ctx, "SELECT 1")
 			if err != nil {
@@ -120,8 +117,8 @@ func monitorDBConnections(pool *pgxpool.Pool) {
 			log.Printf("Error checking for stalled connections: %v", err)
 		}
 
-		// Check for long-running transactions
-		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		// Terminate long-running idle connections with extended timeout
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 		_, err = pool.Exec(ctx, `
 			SELECT pg_terminate_backend(pid)
 			FROM pg_stat_activity
@@ -135,6 +132,7 @@ func monitorDBConnections(pool *pgxpool.Pool) {
 		}
 	}
 }
+
 
 func testDBConnection(db *pgxpool.Pool) error {
 	// Check if the required tables exist
