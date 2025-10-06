@@ -1,0 +1,127 @@
+version: "3.8"
+
+services:
+  # Extend base services
+  db:
+    extends:
+      file: docker-compose.yml
+      service: db
+    # Add more aggressive settings for load testing
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c max_connections=300
+      -c effective_cache_size=2GB
+      -c work_mem=32MB
+      -c maintenance_work_mem=256MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=32MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c max_wal_size=2GB
+      -c min_wal_size=1GB
+
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+    command: redis-server --appendonly no --save "" --maxmemory 512mb --maxmemory-policy allkeys-lru
+
+  app:
+    extends:
+      file: docker-compose.yml
+      service: app
+    environment:
+      - DATABASE_URL=postgres://postgres:example@db:5432/ango?sslmode=disable&pool_max_conns=100
+      - REDIS_URL=redis://redis:6379
+      - GIN_MODE=release
+    deploy:
+      replicas: 2  # Scale to 2 instances for load testing
+
+  prometheus:
+    extends:
+      file: docker-compose.yml
+      service: prometheus
+
+  grafana:
+    extends:
+      file: docker-compose.yml
+      service: grafana
+
+  # K6 Load Testing
+  k6:
+    image: grafana/k6:latest
+    volumes:
+      - ./k6:/scripts
+      - ./k6/results:/results
+    environment:
+      - BASE_URL=http://app:3000
+    depends_on:
+      - app
+    profiles:
+      - loadtest
+    command: run --out json=/results/baseline-results.json /scripts/baseline.js
+
+  # Data seeder
+  k6-seed:
+    image: grafana/k6:latest
+    volumes:
+      - ./k6:/scripts
+    environment:
+      - BASE_URL=http://app:3000
+    depends_on:
+      - app
+    profiles:
+      - seed
+    command: run /scripts/seed-test-data.js
+
+  # Load Balancer for multiple app instances
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
+    profiles:
+      - loadtest
+    command: |
+      sh -c "cat > /etc/nginx/nginx.conf <<'EOF'
+      events {
+          worker_connections 1024;
+      }
+
+      http {
+          upstream ango_backend {
+              server app:3000;
+          }
+
+          server {
+              listen 80;
+
+              location / {
+                  proxy_pass http://ango_backend;
+                  proxy_set_header Host \$$host;
+                  proxy_set_header X-Real-IP \$$remote_addr;
+                  proxy_set_header X-Forwarded-For \$$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$$scheme;
+
+                  # Connection pooling
+                  proxy_http_version 1.1;
+                  proxy_set_header Connection \"\";
+
+                  # Timeouts
+                  proxy_connect_timeout 5s;
+                  proxy_send_timeout 10s;
+                  proxy_read_timeout 10s;
+              }
+          }
+      }
+      EOF
+      nginx -g 'daemon off;'"
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

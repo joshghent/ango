@@ -5,9 +5,8 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
-
-	// "net/http"
-	// _ "net/http/pprof" // Register pprof handlers
+	"net/http"
+	_ "net/http/pprof" // Register pprof handlers
 	"os"
 	"strings"
 	"time"
@@ -15,18 +14,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
-var db *pgxpool.Pool
+var (
+	db                     *pgxpool.Pool
+	redisClient            *redis.Client
+	asyncValidator         *AsyncValidator
+	preAllocator           *PreAllocator
+	circuitBreakerManager  *CircuitBreakerManager
+)
 
 func main() {
 	log.SetOutput(os.Stdout)
-	// go func() {
-	// 	log.Println("Starting pprof on :6060")
-	// 	http.ListenAndServe(":6060", nil)
-	// }()
+
+	// Enable pprof for performance profiling
+	go func() {
+		log.Println("Starting pprof on :6060")
+		if err := http.ListenAndServe(":6060", nil); err != nil {
+			log.Printf("pprof server error: %v", err)
+		}
+	}()
 
 	var err error
+
+	// Connect to database
 	db, err = connectToDB()
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
@@ -34,16 +46,58 @@ func main() {
 	defer db.Close()
 	log.Println("Connected to the database successfully.")
 
+	// Connect to Redis
+	redisClient, err = connectToRedis()
+	if err != nil {
+		log.Printf("Warning: Unable to connect to Redis: %v. Running without Redis cache.", err)
+	} else {
+		defer redisClient.Close()
+		log.Println("Connected to Redis successfully.")
+
+		// Initialize async validator
+		asyncValidator = NewAsyncValidator(redisClient, db, 5) // 5 workers
+		asyncValidator.Start()
+		defer asyncValidator.Stop()
+
+		// Initialize pre-allocator
+		preAllocator = NewPreAllocator(redisClient, db)
+		preAllocator.Start()
+		defer preAllocator.Stop()
+	}
+
 	go monitorDBConnections(db)
+
+	// Initialize circuit breaker
+	circuitBreakerManager = NewCircuitBreakerManager()
+
+	// Start metrics collection
+	StartMetricsCollection(db, redisClient)
 
 	r := gin.Default()
 
-	r.GET("/healthcheck", healthcheckHandler)
+	// Add middleware in order
+	r.Use(TimeoutMiddleware(5 * time.Second)) // 5 second request timeout
+	r.Use(CircuitBreakerMiddleware(circuitBreakerManager))
+	r.Use(PrometheusMiddleware())
+
+	// Health and metrics endpoints
+	r.GET("/healthcheck", HealthCheckHandler(db, redisClient))
+	r.GET("/metrics", MetricsHandler())
+	r.GET("/circuit-breaker", func(c *gin.Context) {
+		c.JSON(200, circuitBreakerManager.GetState())
+	})
+
+	// API endpoints
 	r.POST("/api/v1/code/redeem", getCodeHandler)
 	r.GET("/api/v1/batches", getBatchesHandler)
 	r.POST("/api/v1/codes/upload", uploadCodesHandler)
 
-	if err := r.Run(":3000"); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("Unable to start server: %v\n", err)
 	}
 }
@@ -73,9 +127,11 @@ func connectToDB() (*pgxpool.Pool, error) {
 
 	for i := 0; i < maxRetries; i++ {
 		config, _ := pgxpool.ParseConfig(databaseURL)
-		config.MaxConns = 50
-		config.MaxConnIdleTime = 30 * time.Second
-		config.MaxConnLifetime = 1 * time.Hour
+		// Optimized connection pool settings
+		config.MaxConns = 100
+		config.MinConns = 25
+		config.MaxConnIdleTime = 5 * time.Minute
+		config.MaxConnLifetime = 5 * time.Minute
 		config.HealthCheckPeriod = 1 * time.Minute
 		config.ConnConfig.ConnectTimeout = 5 * time.Second
 
@@ -91,6 +147,38 @@ func connectToDB() (*pgxpool.Pool, error) {
 	}
 
 	return db, err
+}
+
+func connectToRedis() (*redis.Client, error) {
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
+	}
+
+	// Optimize Redis connection pool
+	opt.PoolSize = 50
+	opt.MinIdleConns = 10
+	opt.MaxIdleConns = 25
+	opt.ConnMaxIdleTime = 5 * time.Minute
+	opt.ConnMaxLifetime = 5 * time.Minute
+
+	client := redis.NewClient(opt)
+
+	// Test connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	return client, nil
 }
 
 func monitorDBConnections(pool *pgxpool.Pool) {
@@ -158,39 +246,51 @@ func testDBConnection(db *pgxpool.Pool) error {
 }
 
 func getCodeHandler(c *gin.Context) {
+	start := time.Now()
 	var req Request
 	if err := c.ShouldBindJSON(&req); err != nil {
+		RecordRedemptionError("invalid_json")
 		c.JSON(400, gin.H{"error": "cannot parse json"})
 		return
 	}
 
 	// Validate UUIDs immediately after parsing JSON
 	if _, err := uuid.Parse(req.BatchID); err != nil {
+		RecordRedemptionError("invalid_batch_id")
 		c.JSON(400, gin.H{"error": "invalid batch_id format"})
 		return
 	}
 	if _, err := uuid.Parse(req.ClientID); err != nil {
+		RecordRedemptionError("invalid_client_id")
 		c.JSON(400, gin.H{"error": "invalid client_id format"})
 		return
 	}
 	if _, err := uuid.Parse(req.CustomerID); err != nil {
+		RecordRedemptionError("invalid_customer_id")
 		c.JSON(400, gin.H{"error": "invalid customer_id format"})
 		return
 	}
 
 	code, err := getCode(context.Background(), req)
+	duration := time.Since(start)
+
 	if err != nil {
 		if err == ErrNoCodeFound {
+			RecordRedemptionError("no_code_found")
 			c.JSON(404, gin.H{"error": "no code found"})
 		} else if err == ErrConditionNotMet {
+			RecordRedemptionError("rule_violation")
 			c.JSON(403, gin.H{"error": "rule conditions not met"})
 		} else {
+			RecordRedemptionError("database_error")
 			log.Printf("Error: %v", err)
 			c.JSON(500, gin.H{"error": "database error"})
 		}
 		return
 	}
 
+	// Record successful redemption
+	RecordCodeRedemption(duration, req.BatchID, req.ClientID, false) // TODO: track if pre-allocated
 	c.JSON(200, Code{Code: code})
 }
 
@@ -274,13 +374,3 @@ func containsColumns(headers []string, requiredColumns []string) bool {
 	return true
 }
 
-// Add this new function at the end of the file
-func healthcheckHandler(c *gin.Context) {
-	err := db.Ping(context.Background())
-	if err != nil {
-		log.Printf("Healthcheck failed: %v", err)
-		c.JSON(500, gin.H{"status": "unhealthy", "message": "Unable to connect to the database"})
-		return
-	}
-	c.JSON(200, gin.H{"status": "healthy", "message": "System is operational"})
-}

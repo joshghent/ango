@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -71,74 +72,147 @@ func getCode(ctx context.Context, req Request) (string, error) {
         return "", ErrBatchExpired
     }
 
-    // Begin transaction after initial check
-    tx, err := db.BeginTx(ctx, pgx.TxOptions{})
-    if err != nil {
-        return "", err
-    }
-    defer func() {
-        if tx != nil {
-            tx.Rollback(ctx) // Ensure rollback if not committed
-        }
-    }()
-
     selectCodeTime := time.Now()
 
-    // Attempt to acquire a code
+    // Try pre-allocated codes first for high-volume batches
     var code string
-    err = tx.QueryRow(ctx, `
-        SELECT code
-        FROM codes
-        WHERE batch_id = $1 AND client_id = $2 AND customer_id IS NULL
-        FOR NO KEY UPDATE SKIP LOCKED
-        LIMIT 1
-    `, req.BatchID, req.ClientID).Scan(&code)
-    if err != nil {
-        if err == pgx.ErrNoRows {
-            return "", ErrNoCodeFound
+    var codeID int
+    var gotPreAllocated bool
+
+    if preAllocator != nil {
+        codeID, code, gotPreAllocated = preAllocator.TryGetPreAllocatedCode(ctx, req.BatchID, req.ClientID)
+        if gotPreAllocated {
+            // Begin transaction to claim the pre-allocated code
+            tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+            if err != nil {
+                return "", err
+            }
+            defer func() {
+                if tx != nil {
+                    tx.Rollback(ctx)
+                }
+            }()
+
+            // Update the pre-allocated code
+            result, err := tx.Exec(ctx, `
+                UPDATE codes
+                SET customer_id = $1, used_at = NOW()
+                WHERE id = $2 AND customer_id IS NULL
+            `, req.CustomerID, codeID)
+            if err != nil {
+                return "", err
+            }
+
+            // Check if we actually updated a row (code might have been taken by another request)
+            if result.RowsAffected() == 0 {
+                // Code was already taken, fall back to normal allocation
+                gotPreAllocated = false
+            } else {
+                // Successfully claimed pre-allocated code
+                if err = tx.Commit(ctx); err != nil {
+                    return "", err
+                }
+                tx = nil
+                log.Printf("Used pre-allocated code %s for batch %s", code, req.BatchID)
+            }
         }
-        return "", err
     }
 
-    if time.Since(selectCodeTime) > 100*time.Millisecond {
-        log.Printf("Queries for selecting code took too long (%v)ms", time.Since(selectCodeTime))
+    // Fall back to normal atomic allocation if pre-allocation failed
+    if !gotPreAllocated {
+        tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+        if err != nil {
+            return "", err
+        }
+        defer func() {
+            if tx != nil {
+                tx.Rollback(ctx) // Ensure rollback if not committed
+            }
+        }()
+
+        // Attempt to acquire and update a code atomically
+        err = tx.QueryRow(ctx, `
+            UPDATE codes
+            SET customer_id = $3, used_at = NOW()
+            WHERE id = (
+                SELECT id FROM codes
+                WHERE batch_id = $1 AND client_id = $2 AND customer_id IS NULL
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING code, id
+        `, req.BatchID, req.ClientID, req.CustomerID).Scan(&code, &codeID)
+        if err != nil {
+            if err == pgx.ErrNoRows {
+                return "", ErrNoCodeFound
+            }
+            return "", err
+        }
+
+        if err = tx.Commit(ctx); err != nil {
+            return "", err
+        }
+        tx = nil
     }
 
-    if !checkRules(rules, req.CustomerID) {
-        return "", ErrConditionNotMet
+    if time.Since(selectCodeTime) > 50*time.Millisecond {
+        log.Printf("Code acquisition took too long (%v)ms", time.Since(selectCodeTime))
     }
 
-    // Code usage updates
-    updateCodesTime := time.Now()
-    _, err = tx.Exec(ctx, "UPDATE codes SET customer_id=$1 WHERE code=$2", req.CustomerID, code)
-    if err != nil {
-        return "", err
-    }
-    if time.Since(updateCodesTime) > 100*time.Millisecond {
-        log.Printf("Query for updating codes took too long (%v)ms", time.Since(updateCodesTime))
+    // For immediate response, do basic rule checking synchronously
+    // More complex validation will be done asynchronously
+    if rules.MaxPerCustomer > 0 {
+        // Quick check - only fail if customer has obviously exceeded limits
+        count, err := getCustomerCodeCount(ctx, req.CustomerID, rules.TimeLimit)
+        if err != nil {
+            log.Printf("Error doing quick rule check: %v", err)
+        } else {
+            log.Printf("Debug: Customer %s has %d used codes, max allowed: %d", req.CustomerID, count, rules.MaxPerCustomer)
+            if count >= rules.MaxPerCustomer {
+                // Clear violation, rollback the code allocation
+                _, rollbackErr := db.Exec(ctx, "UPDATE codes SET customer_id = NULL, used_at = NULL WHERE id = $1", codeID)
+                if rollbackErr != nil {
+                    log.Printf("Failed to rollback code allocation: %v", rollbackErr)
+                }
+                return "", ErrConditionNotMet
+            }
+        }
     }
 
-		// Remove code usage because it's not needed, will queue for later.
-    // insertCodeUsageTime := time.Now()
-    // _, err = tx.Exec(ctx, "INSERT INTO code_usage (code, batch_id, client_id, customer_id, used_at) VALUES ($1, $2, $3, $4, $5)", code, req.BatchID, req.ClientID, req.CustomerID, time.Now())
-    // if err != nil {
-    //     return "", err
-    // }
-    // if time.Since(insertCodeUsageTime) > 100*time.Millisecond {
-    //     log.Printf("Query for inserting code usage took too long (%v)ms", time.Since(insertCodeUsageTime))
-    // }
-
-    if err = tx.Commit(ctx); err != nil {
-        return "", err
+    // Queue detailed async validation
+    if asyncValidator != nil {
+        validationJob := ValidationJob{
+            CodeID:     codeID,
+            Code:       code,
+            BatchID:    req.BatchID,
+            ClientID:   req.ClientID,
+            CustomerID: req.CustomerID,
+            Rules:      rules,
+            Timestamp:  time.Now(),
+        }
+        if err := asyncValidator.QueueValidation(validationJob); err != nil {
+            log.Printf("Failed to queue async validation for code %s: %v", code, err)
+        }
     }
-    tx = nil // Avoid rollback
 
     return code, nil
 }
 
 
 func getRulesForBatch(ctx context.Context, batchID string) (Rules, bool, error) {
-	// Check cache first
+	// Try Redis cache first
+	if redisClient != nil {
+		cacheKey := fmt.Sprintf("batch_rules:%s", batchID)
+		cached, err := redisClient.Get(ctx, cacheKey).Result()
+		if err == nil {
+			var cachedRules CachedRules
+			if json.Unmarshal([]byte(cached), &cachedRules) == nil {
+				return cachedRules.Rules, cachedRules.Expired, nil
+			}
+		}
+	}
+
+	// Fallback to in-memory cache
 	if cached, found := batchCache.Load(batchID); found {
 		cachedRules := cached.(CachedRules)
 		// Check if the cache is still valid
@@ -157,12 +231,21 @@ func getRulesForBatch(ctx context.Context, batchID string) (Rules, bool, error) 
 		return Rules{}, false, err
 	}
 
-	// Store the fetched rules in cache
-	batchCache.Store(batchID, CachedRules{
+	cachedRules := CachedRules{
 		Rules:     rules,
 		Expired:   expired,
 		CacheTime: time.Now(),
-	})
+	}
+
+	// Store in both Redis and in-memory cache
+	if redisClient != nil {
+		cacheKey := fmt.Sprintf("batch_rules:%s", batchID)
+		if rulesBytes, err := json.Marshal(cachedRules); err == nil {
+			redisClient.SetEx(ctx, cacheKey, rulesBytes, cacheExpiration)
+		}
+	}
+
+	batchCache.Store(batchID, cachedRules)
 
 	return rules, expired, nil
 }
@@ -282,6 +365,23 @@ func (r MaxPerCustomerRule) Check(ctx context.Context, customerID string) bool {
 	}
 
 	return count < r.MaxCount
+}
+
+func getCustomerCodeCount(ctx context.Context, customerID string, timeLimit int) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM codes
+		WHERE customer_id = $1 AND used_at IS NOT NULL`
+	args := []interface{}{customerID}
+
+	if timeLimit > 0 {
+		query += ` AND used_at >= $2`
+		args = append(args, time.Now().AddDate(0, 0, -timeLimit))
+	}
+
+	var count int
+	err := db.QueryRow(ctx, query, args...).Scan(&count)
+	return count, err
 }
 
 func checkRules(rules Rules, customerID string) bool {

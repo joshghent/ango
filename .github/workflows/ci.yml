@@ -1,20 +1,42 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of performance test to run'
+        required: true
+        default: 'baseline'
+        type: choice
+        options:
+        - baseline
+        - stress
+        - spike
+        - soak
+        - all
+
+env:
+  GO_VERSION: '1.21'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Basic validation and testing
   test:
+    name: Test and Validate
     runs-on: ubuntu-latest
 
     services:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: example
+          POSTGRES_DB: ango_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -23,28 +45,164 @@ jobs:
         ports:
           - 5432:5432
 
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.22'
+        go-version: ${{ env.GO_VERSION }}
 
-    - name: Install dependencies
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
       run: go mod download
 
-    - name: Install golang-migrate
-      run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+    - name: Verify dependencies
+      run: go mod verify
 
-    - name: Run migrations and seed data
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run go fmt check
       run: |
-        make migrate
-        make seed
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "The following files are not formatted correctly:"
+          gofmt -s -l .
+          exit 1
+        fi
 
-    - name: Run tests
+    - name: Install golang-migrate
+      run: |
+        curl -L https://github.com/golang-migrate/migrate/releases/download/v4.16.2/migrate.linux-amd64.tar.gz | tar xvz
+        sudo mv migrate /usr/local/bin/
+
+    - name: Run database migrations
+      run: |
+        migrate -path db/migrations -database "postgres://postgres:example@localhost:5432/ango_test?sslmode=disable" up
       env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable
-      run: make test
+        DATABASE_URL: postgres://postgres:example@localhost:5432/ango_test?sslmode=disable
+
+    - name: Run tests with race detection
+      run: go test -race -coverprofile=coverage.out ./...
+      env:
+        DATABASE_URL: postgres://postgres:example@localhost:5432/ango_test?sslmode=disable
+        REDIS_URL: redis://localhost:6379
+
+    - name: Generate coverage report
+      run: go tool cover -html=coverage.out -o coverage.html
+
+    - name: Upload coverage artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: coverage.html
+
+  # Security scanning
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Run Gosec Security Scanner
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: './...'
+
+    - name: Run govulncheck
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+  # Performance testing (baseline only for PRs)
+  performance-test:
+    name: Performance Test
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'pull_request'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Start test environment
+      run: |
+        docker-compose -f docker-compose.loadtest.yml up -d db redis app
+
+        # Wait for services to be healthy
+        echo "Waiting for services to be ready..."
+        for i in {1..30}; do
+          if curl -f http://localhost:3000/healthcheck; then
+            echo "Services are ready!"
+            break
+          fi
+          echo "Waiting... ($i/30)"
+          sleep 5
+        done
+
+    - name: Seed test data
+      run: |
+        docker run --rm \
+          --network ango_default \
+          -v $(pwd)/k6:/scripts \
+          -e BASE_URL=http://app:3000 \
+          grafana/k6:latest run /scripts/seed-test-data.js
+
+    - name: Run baseline performance test
+      run: |
+        mkdir -p k6/results
+        docker run --rm \
+          --network ango_default \
+          -v $(pwd)/k6:/scripts \
+          -v $(pwd)/k6/results:/results \
+          -e BASE_URL=http://app:3000 \
+          grafana/k6:latest run \
+          --out json=/results/baseline-results.json \
+          /scripts/baseline.js
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-results
+        path: k6/results/
+
+    - name: Performance regression check
+      run: |
+        # Simple check - can be enhanced with historical comparison
+        if [ -f k6/results/baseline-results.json ]; then
+          echo "Performance test completed successfully"
+        else
+          echo "Performance test failed"
+          exit 1
+        fi
+
+    - name: Clean up
+      if: always()
+      run: docker-compose -f docker-compose.loadtest.yml down -v
